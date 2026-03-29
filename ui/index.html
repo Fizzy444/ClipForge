@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YTDL</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080808; --surface: #101010; --surface2: #161616; --border: #1e1e1e;
+    --border2: #2a2a2a; --accent: #c8f535; --accent-dim: rgba(200,245,53,0.12);
+    --text: #e2e2e2; --muted: #4a4a4a; --muted2: #666; --error: #ff5050; --success: #3dffa0;
+    --warn: #f5a623;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; user-select: none; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .main { flex: 1; overflow-y: auto; padding: 28px 28px 24px; scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+  .section { margin-bottom: 22px; }
+  .section-label { font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .url-wrap { position: relative; }
+  .url-input { width: 100%; background: var(--surface); border: 1px solid var(--border2); border-radius: 3px; padding: 11px 42px 11px 14px; color: var(--text); font-family: 'Space Mono', monospace; font-size: 11px; outline: none; }
+  .url-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .seg { display: flex; border: 1px solid var(--border2); border-radius: 3px; overflow: hidden; }
+  .seg-btn { flex: 1; background: var(--surface); border: none; color: var(--muted2); font-family: 'Space Mono', monospace; font-size: 10px; padding: 9px 4px; cursor: pointer; text-transform: uppercase; transition: all 0.12s; }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--border2); }
+  .seg-btn.active { background: var(--accent); color: #0a0a0a; font-weight: 700; }
+  .opt-label { font-size: 10px; font-family: 'Space Mono', monospace; color: var(--muted2); margin-bottom: 6px; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+  .time-grid { display: grid; grid-template-columns: 1fr 24px 1fr; gap: 8px; align-items: center; }
+  .time-input { width: 100%; background: var(--surface); border: 1px solid var(--border2); border-radius: 3px; padding: 10px; color: var(--text); font-family: 'Space Mono', monospace; text-align: center; outline: none; }
+  .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .mode-card { background: var(--surface); border: 1px solid var(--border2); border-radius: 3px; padding: 11px; cursor: pointer; }
+  .mode-card.active { border-color: var(--accent); background: var(--accent-dim); }
+  .mode-card-title { font-family: 'Space Mono', monospace; font-size: 9px; font-weight: 700; color: var(--text); text-transform: uppercase; }
+  .mode-card-desc { font-size: 10px; color: var(--muted2); line-height: 1.4; }
+  .btn-dl { width: 100%; padding: 14px; background: var(--accent); border: none; border-radius: 3px; color: #080808; font-family: 'Space Mono', monospace; font-weight: 700; cursor: pointer; margin-top: 10px; text-transform: uppercase; }
+  .status-box { margin-top: 18px; background: var(--surface); border: 1px solid var(--border2); border-radius: 3px; padding: 16px; display: none; }
+  .status-box.visible { display: block; }
+  .progress-track { height: 2px; background: var(--border2); border-radius: 2px; overflow: hidden; margin-bottom: 12px; position: relative; }
+  .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+  .status-msg { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--muted2); }
+  .done-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .btn-folder { flex: 1; padding: 9px; background: transparent; border: 1px solid var(--success); color: var(--success); border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 10px; cursor: pointer; }
+  @keyframes slide { 0% { transform: translateX(-100%); width: 30%; } 100% { transform: translateX(400%); width: 30%; } }
+  .sliding { animation: slide 1.4s ease-in-out infinite; }
+
+  .info-btn { background: none; border: 1px solid var(--border2); border-radius: 50%; color: var(--muted2); font-family: 'Space Mono', monospace; font-size: 9px; width: 16px; height: 16px; cursor: pointer; line-height: 14px; text-align: center; padding: 0; flex-shrink: 0; }
+  .info-popup { display: none; position: fixed; z-index: 100; background: #1a1a1a; border: 1px solid var(--border2); border-radius: 4px; padding: 14px; max-width: 280px; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+  .info-popup.visible { display: block; }
+  .info-popup-title { font-family: 'Space Mono', monospace; font-size: 10px; font-weight: 700; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; }
+  .info-popup p { font-size: 11px; color: var(--muted2); line-height: 1.6; margin-bottom: 6px; }
+  .info-popup p:last-child { margin-bottom: 0; }
+  .info-popup strong { color: var(--text); }
+  .info-popup-close { position: absolute; top: 8px; right: 10px; background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; }
+  .warn-note { font-family: 'Space Mono', monospace; font-size: 9px; color: var(--warn); margin-top: 5px; }
+</style>
+</head>
+<body>
+<div class="main">
+  <div class="section">
+    <div class="section-label">Video URL</div>
+    <input class="url-input" id="url" type="text" placeholder="https://youtube.com/watch?v=..." />
+  </div>
+
+  <div class="section">
+    <div class="section-label">Download Mode</div>
+    <div class="mode-grid" id="modeGrid">
+      <div class="mode-card" data-mode="full"><div class="mode-card-title">Full</div><div class="mode-card-desc">Entire video</div></div>
+      <div class="mode-card" data-mode="cut"><div class="mode-card-title">Cut</div><div class="mode-card-desc">Lossless Trim</div></div>
+      <div class="mode-card active" data-mode="quick"><div class="mode-card-title">Quick</div><div class="mode-card-desc">Fast Stream</div></div>
+    </div>
+  </div>
+
+  <div class="section" id="timestampSection">
+    <div class="section-label">Timestamp</div>
+    <div class="time-grid">
+      <input class="time-input" id="start" placeholder="0:00" />
+      <div style="text-align: center; color: var(--muted);">→</div>
+      <input class="time-input" id="end" placeholder="1:00" />
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Options</div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+      <div>
+        <div class="opt-label">Format</div>
+        <div class="seg" id="fmt-seg">
+          <button class="seg-btn active" data-val="video">Video</button>
+          <button class="seg-btn" data-val="audio">Audio</button>
+        </div>
+      </div>
+      <div>
+        <div class="opt-label">Max Quality</div>
+        <div class="seg" id="q-seg">
+          <button class="seg-btn" data-val="480">480p</button>
+          <button class="seg-btn active" data-val="720">720p</button>
+          <button class="seg-btn" data-val="1080">1080p</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="opt-label">
+        Cookies (Age Restricted / Private)
+        <button class="info-btn" id="cookieInfoBtn">?</button>
+      </div>
+      <div class="seg" id="cookie-seg">
+        <button class="seg-btn active" data-val="none">None</button>
+        <button class="seg-btn" data-val="firefox">Firefox</button>
+        <button class="seg-btn" data-val="file">.txt File</button>
+      </div>
+      <div id="cookie-file-info" style="display:none; font-family:'Space Mono'; font-size:9px; color:var(--accent); margin-top:5px;">
+        Active: <span id="cookie-filename"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Save To</div>
+    <div class="url-wrap" style="display: flex; gap: 8px;">
+      <input class="url-input" id="savePath" type="text" readonly style="color: var(--muted2); font-size: 10px;" />
+      <button class="btn-action" id="changeFolderBtn" style="flex: 0 0 80px; background: var(--surface); border: 1px solid var(--border2); color: var(--text); font-family: 'Space Mono'; font-size: 10px; cursor: pointer; border-radius: 3px;">Change</button>
+    </div>
+  </div>
+
+  <button class="btn-dl" id="dlBtn">Download</button>
+
+  <div class="status-box" id="statusBox">
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="status-msg" id="statusMsg">Starting...</div>
+    <div id="doneArea"></div>
+  </div>
+</div>
+
+<div class="info-popup" id="cookiePopup">
+  <button class="info-popup-close" id="cookiePopupClose">✕</button>
+  <div class="info-popup-title">Cookie Options</div>
+  <p><strong>None</strong> — No login. Works for most public videos.</p>
+  <p><strong>Firefox</strong> — Reads cookies directly from your Firefox profile. Firefox must be installed and you must be logged into YouTube in it.</p>
+  <p><strong>.txt File</strong> — Load a Netscape-format cookie file. To export from Chrome or Firefox, install the <strong>"Get cookies.txt LOCALLY"</strong> extension, open YouTube, click the extension, and save the file.</p>
+  <p style="color: var(--warn); font-size: 10px;">⚠ Chrome direct extraction is disabled. Chrome 127+ encrypts cookies in a way no external tool can read. Use Firefox or .txt instead.</p>
+</div>
+
+<script>
+  let fmt = 'video', quality = '720', mode = 'quick', browser = 'none', pollTimer = null;
+
+  async function loadCfg() { 
+    try {
+      const r = await fetch('/api/config'); 
+      const d = await r.json(); 
+      document.getElementById('savePath').value = d.download_dir; 
+    } catch (e) { console.error("Failed to load config", e); }
+  }
+  loadCfg();
+
+  const cookiePopup = document.getElementById('cookiePopup');
+  document.getElementById('cookieInfoBtn').onclick = (e) => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    cookiePopup.style.top = (rect.bottom + 8) + 'px';
+    cookiePopup.style.left = Math.min(rect.left, window.innerWidth - 300) + 'px';
+    cookiePopup.classList.toggle('visible');
+  };
+
+  document.getElementById('cookiePopupClose').onclick = () => cookiePopup.classList.remove('visible');
+  
+  document.addEventListener('click', (e) => {
+    if (!cookiePopup.contains(e.target) && e.target.id !== 'cookieInfoBtn') {
+      cookiePopup.classList.remove('visible');
+    }
+  });
+
+  document.getElementById('changeFolderBtn').onclick = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api/select_folder', { method: 'POST' }); 
+      const d = await r.json();
+      if (d.download_dir) {
+        document.getElementById('savePath').value = d.download_dir;
+      }
+    } catch (e) { alert("Error selecting folder"); }
+  };
+
+  document.querySelectorAll('#modeGrid .mode-card').forEach(c => c.onclick = () => {
+    document.querySelectorAll('#modeGrid .mode-card').forEach(x => x.classList.remove('active'));
+    c.classList.add('active'); 
+    mode = c.dataset.mode;
+    document.getElementById('timestampSection').style.opacity = (mode === 'full' ? '0.3' : '1');
+  });
+
+  document.querySelectorAll('.seg-btn').forEach(b => {
+    b.onclick = async () => {
+      const parent = b.parentElement.id;
+      
+      if (!parent || !['fmt-seg', 'q-seg', 'cookie-seg'].includes(parent)) return;
+
+      if (parent === 'fmt-seg') fmt = b.dataset.val;
+      if (parent === 'q-seg') quality = b.dataset.val;
+      
+      if (parent === 'cookie-seg') {
+        browser = b.dataset.val;
+        if (browser === 'file') {
+          const r = await fetch('/api/select_cookie_file', { method: 'POST' }); 
+          const d = await r.json();
+          if (d.filename) {
+            document.getElementById('cookie-filename').textContent = d.filename;
+            document.getElementById('cookie-file-info').style.display = 'block';
+          } else {
+            b.parentElement.querySelector('[data-val="none"]').click();
+            return;
+          }
+        } else {
+          document.getElementById('cookie-file-info').style.display = 'none';
+        }
+      }
+
+      b.parentElement.querySelectorAll('.seg-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+    };
+  });
+  document.getElementById('dlBtn').onclick = async () => {
+    const url = document.getElementById('url').value;
+    if (!url) { alert("Please enter a URL"); return; }
+
+    const btn = document.getElementById('dlBtn'), 
+          sBox = document.getElementById('statusBox'),
+          pFill = document.getElementById('progressFill'), 
+          sMsg = document.getElementById('statusMsg');
+
+    btn.disabled = true; 
+    sBox.classList.add('visible'); 
+    pFill.classList.add('sliding'); 
+    pFill.style.width = '30%';
+    sMsg.style.color = ''; 
+    sMsg.textContent = 'Initializing...'; 
+    document.getElementById('doneArea').innerHTML = '';
+
+    try {
+      const r = await fetch('/api/download', {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url, 
+          start: document.getElementById('start').value, 
+          end: document.getElementById('end').value, 
+          format: fmt, 
+          quality, 
+          mode, 
+          browser
+        })
+      });
+      const { job_id } = await r.json();
+
+      if (pollTimer) clearInterval(pollTimer);
+
+      pollTimer = setInterval(async () => {
+        try {
+          const sr = await fetch('/api/status/' + job_id); 
+          const s = await sr.json();
+          
+          if (s.percent && parseFloat(s.percent) > 0) { 
+            pFill.classList.remove('sliding'); 
+            pFill.style.width = s.percent + '%'; 
+          }
+          sMsg.textContent = s.progress;
+
+          if (s.status === 'done' || s.status === 'error') {
+            clearInterval(pollTimer); 
+            btn.disabled = false;
+            pFill.classList.remove('sliding'); 
+            pFill.style.width = '100%';
+            
+            if (s.status === 'done') {
+              sMsg.style.color = 'var(--success)';
+              document.getElementById('doneArea').innerHTML = `
+                <div class="done-actions">
+                  <button class="btn-folder" onclick="fetch('/api/open_folder',{method:'POST'})">Open Folder</button>
+                </div>`;
+            } else {
+              sMsg.style.color = 'var(--error)';
+            }
+          }
+        } catch (e) { clearInterval(pollTimer); btn.disabled = false; }
+      }, 800);
+    } catch (e) {
+      btn.disabled = false;
+      sMsg.textContent = "Connection error.";
+      sMsg.style.color = 'var(--error)';
+    }
+  };
+</script>
+</body>
+</html>
