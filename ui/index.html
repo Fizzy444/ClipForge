@@ -26,6 +26,10 @@
   .seg-btn { flex: 1; background: var(--surface); border: none; color: var(--muted2); font-family: 'Space Mono', monospace; font-size: 10px; padding: 9px 4px; cursor: pointer; text-transform: uppercase; transition: all 0.12s; }
   .seg-btn + .seg-btn { border-left: 1px solid var(--border2); }
   .seg-btn.active { background: var(--accent); color: #0a0a0a; font-weight: 700; }
+  .quality-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .quality-seg .seg-btn { min-width: 0; }
+  .quality-seg .seg-btn:nth-child(4) { border-left: none; }
+  .quality-seg .seg-btn:nth-child(n+4) { border-top: 1px solid var(--border2); }
   .opt-label { font-size: 10px; font-family: 'Space Mono', monospace; color: var(--muted2); margin-bottom: 6px; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
   .time-grid { display: grid; grid-template-columns: 1fr 24px 1fr; gap: 8px; align-items: center; }
   .time-input { width: 100%; background: var(--surface); border: 1px solid var(--border2); border-radius: 3px; padding: 10px; color: var(--text); font-family: 'Space Mono', monospace; text-align: center; outline: none; }
@@ -93,10 +97,13 @@
       </div>
       <div>
         <div class="opt-label">Max Quality</div>
-        <div class="seg" id="q-seg">
-          <button class="seg-btn" data-val="480">480p</button>
-          <button class="seg-btn active" data-val="720">720p</button>
+        <div class="seg quality-seg" id="q-seg">
+          <button class="seg-btn active" data-val="best">Best</button>
+          <button class="seg-btn" data-val="2160">4K</button>
+          <button class="seg-btn" data-val="1440">1440p</button>
           <button class="seg-btn" data-val="1080">1080p</button>
+          <button class="seg-btn" data-val="720">720p</button>
+          <button class="seg-btn" data-val="480">480p</button>
         </div>
       </div>
     </div>
@@ -143,7 +150,7 @@
 </div>
 
 <script>
-  let fmt = 'video', quality = '720', mode = 'quick', browser = 'none', pollTimer = null;
+  let fmt = 'video', quality = 'best', mode = 'quick', browser = 'none', pollTimer = null;
 
   async function loadCfg() { 
     try {

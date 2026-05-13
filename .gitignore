@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+build/
+dist/
+*.spec.bak
+
+.env
+.env.*
+cookies.txt
+
+*.log

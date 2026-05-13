@@ -36,6 +36,109 @@ def parse_time(t):
     except: return None
     return None
 
+def format_bytes_per_second(value):
+    if not value or value <= 0:
+        return 'Speed --'
+
+    units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+    speed = float(value)
+    unit_index = 0
+    while speed >= 1024 and unit_index < len(units) - 1:
+        speed /= 1024
+        unit_index += 1
+
+    if unit_index == 0:
+        return f'{speed:.0f} {units[unit_index]}'
+    return f'{speed:.1f} {units[unit_index]}'
+
+def format_eta(value):
+    if value is None:
+        return 'ETA --'
+
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 'ETA --'
+
+    if seconds < 0:
+        return 'ETA --'
+
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f'ETA {hours:d}:{minutes:02d}:{seconds:02d}'
+    return f'ETA {minutes:02d}:{seconds:02d}'
+
+def clean_percent(value):
+    value = str(value or '0').replace('%', '').strip()
+    try:
+        return f'{float(value):.1f}'.rstrip('0').rstrip('.')
+    except ValueError:
+        return '0'
+
+def calculate_percent(progress):
+    downloaded = progress.get('downloaded_bytes') or 0
+    total = progress.get('total_bytes') or progress.get('total_bytes_estimate') or 0
+
+    if downloaded and total:
+        percent = min(max((downloaded / total) * 100, 0), 100)
+        return f'{percent:.1f}'.rstrip('0').rstrip('.')
+
+    return clean_percent(progress.get('_percent_str', '0%'))
+
+def parse_ffmpeg_time(value):
+    if not value:
+        return None
+
+    value = str(value).strip()
+    try:
+        if ':' not in value:
+            return float(value)
+        hours, minutes, seconds = value.split(':')
+        return (int(hours) * 3600) + (int(minutes) * 60) + float(seconds)
+    except (TypeError, ValueError):
+        return None
+
+def parse_ffmpeg_progress_seconds(key, value):
+    if key in ('out_time_us', 'out_time_ms'):
+        try:
+            return int(value) / 1000000
+        except (TypeError, ValueError):
+            return None
+
+    if key == 'out_time':
+        return parse_ffmpeg_time(value)
+
+    return None
+
+def calculate_trim_duration(start, end, source_duration):
+    start = start or 0
+    if end is not None:
+        return max(end - start, 0)
+    if source_duration:
+        return max(float(source_duration) - start, 0)
+    return None
+
+def build_format_options(fmt, quality, mode):
+    if fmt == 'audio':
+        return 'bestaudio/best', ['abr', 'asr', 'filesize']
+
+    if quality in ['480', '720', '1080', '1440', '2160']:
+        height_filter = f'[height<={quality}]'
+    else:
+        height_filter = ''
+
+    if height_filter:
+        format_str = f'bestvideo{height_filter}+bestaudio/best{height_filter}'
+    else:
+        format_str = 'bestvideo+bestaudio/best'
+
+    sort_order = ['res', 'fps', 'hdr', 'vbr', 'abr', 'filesize']
+    if mode != 'full':
+        sort_order = ['res', 'fps', 'vcodec:h264,hevc,vp9,av01', 'vbr', 'abr', 'filesize']
+
+    return format_str, sort_order
+
 def create_app(get_resource_path):
     app = Flask(__name__)
     app.config['DOWNLOAD_DIR'] = os.path.join(os.path.expanduser('~'), 'Downloads', 'YTDL')
@@ -44,6 +147,58 @@ def create_app(get_resource_path):
 
     jobs = {}
     ffmpeg_bin = get_ffmpeg_path(get_resource_path)
+
+    def trim_with_ffmpeg(input_path, output_path, start, end, source_duration, job):
+        trim_duration = calculate_trim_duration(start, end, source_duration)
+        if not trim_duration:
+            return input_path
+
+        command = [
+            ffmpeg_bin,
+            '-hide_banner',
+            '-nostdin',
+            '-y',
+        ]
+        if start:
+            command.extend(['-ss', str(start)])
+        command.extend(['-i', input_path, '-t', str(trim_duration)])
+        command.extend([
+            '-c', 'copy',
+            '-avoid_negative_ts', 'make_zero',
+            '-progress', 'pipe:1',
+            '-nostats',
+            '-loglevel', 'error',
+            output_path,
+        ])
+
+        job.update({'percent': '0', 'progress': 'Trimming: 0%'})
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            universal_newlines=True,
+        )
+
+        if process.stdout:
+            for line in process.stdout:
+                line = line.strip()
+                if '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                seconds_done = parse_ffmpeg_progress_seconds(key, value)
+                if seconds_done is None:
+                    continue
+                percent = min(max((seconds_done / trim_duration) * 100, 0), 100)
+                p_raw = f'{percent:.1f}'.rstrip('0').rstrip('.')
+                job.update({'percent': p_raw, 'progress': f'Trimming: {p_raw}%'})
+
+        _, stderr = process.communicate()
+        if process.returncode != 0:
+            raise Exception(stderr.strip() or 'FFmpeg trim failed.')
+
+        job.update({'percent': '100', 'progress': 'Trimming: 100%'})
+        return output_path
 
     def do_download(job_id, url, start, end, fmt, quality, mode, browser):
         job = jobs[job_id]
@@ -55,21 +210,12 @@ def create_app(get_resource_path):
         try:
             uid = str(uuid.uuid4())[:8]
             raw_template = os.path.join(download_path, f'tmp_{uid}.%(ext)s')
-            res = quality if quality in ['480', '720', '1080'] else '720'
-
-            if fmt == 'audio':
-                format_str = 'bestaudio/best'
-                sort_order = ['abr', 'br']
-            elif mode == 'full':
-                format_str = f"bestvideo[height<={res}]+bestaudio/best[height<={res}]"
-                sort_order = [f'res:{res}', 'br', 'size', 'codec:vp9', 'codec:av1']
-            else:
-                format_str = f"bestvideo[height<={res}][vcodec^=avc1]+bestaudio/best[height<={res}]"
-                sort_order = [f'res:{res}', 'codec:h264', 'br']
+            format_str, sort_order = build_format_options(fmt, quality, mode)
 
             ydl_opts = {
                 'format': format_str,
                 'format_sort': sort_order, 
+                'format_sort_force': True,
                 'outtmpl': raw_template,
                 'quiet': True,
                 'no_warnings': True,
@@ -94,7 +240,7 @@ def create_app(get_resource_path):
                     'preferredquality': '320',
                 }]
 
-            if (start is not None or end is not None) and mode != 'full':
+            if (start is not None or end is not None) and mode == 'quick':
                 s = start if start is not None else 0
                 e = end if end is not None else float('inf')
                 ydl_opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(s, e)])
@@ -102,8 +248,15 @@ def create_app(get_resource_path):
 
             def progress_hook(d):
                 if d['status'] == 'downloading':
-                    p_raw = d.get('_percent_str', '0%').replace('%', '').strip()
-                    job.update({'percent': p_raw if p_raw != 'Unknown' else '0', 'progress': f"Downloading: {p_raw}%"})
+                    p_raw = calculate_percent(d)
+                    speed = format_bytes_per_second(d.get('speed'))
+                    eta = format_eta(d.get('eta'))
+                    job.update({
+                        'percent': p_raw,
+                        'speed': speed,
+                        'eta': eta,
+                        'progress': f'Downloading: {p_raw}% | {speed} | {eta}',
+                    })
                 elif d['status'] == 'finished':
                     job['progress'] = 'Merging...'
 
@@ -128,6 +281,22 @@ def create_app(get_resource_path):
 
             if not downloaded_file:
                 raise FileNotFoundError('Process finished but output file not found.')
+
+            if mode == 'cut' and (start is not None or end is not None):
+                trim_ext = 'mp3' if fmt == 'audio' else disk_ext
+                trimmed_file = os.path.join(download_path, f'tmp_{uid}_trimmed.{trim_ext}')
+                source_file = downloaded_file
+                downloaded_file = trim_with_ffmpeg(
+                    downloaded_file,
+                    trimmed_file,
+                    start,
+                    end,
+                    info.get('duration'),
+                    job,
+                )
+                if downloaded_file != source_file and os.path.exists(source_file):
+                    os.remove(source_file)
+                disk_ext = trim_ext
 
             # 3. Final Renaming (Uses the extension found on disk)
             final_ext = 'mp3' if fmt == 'audio' else disk_ext
